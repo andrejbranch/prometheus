@@ -394,7 +394,8 @@ func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, hi
 		hints = &storage.LabelHints{}
 	}
 
-	allValues, err := r.LabelValues(ctx, name, hints)
+	// Do not apply limit here we need all values
+	allValues, err := r.LabelValues(ctx, name, &storage.LabelHints{})
 	if err != nil {
 		return nil, fmt.Errorf("fetching values of label %s: %w", name, err)
 	}
