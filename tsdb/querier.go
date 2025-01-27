@@ -78,7 +78,7 @@ func newBlockBaseQuerier(b BlockReader, mint, maxt int64) (*blockBaseQuerier, er
 }
 
 func (q *blockBaseQuerier) LabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
-	res, err := q.index.SortedLabelValues(ctx, name, matchers...)
+	res, err := q.index.SortedLabelValues(ctx, name, hints, matchers...)
 	return res, nil, err
 }
 
@@ -390,8 +390,8 @@ func inversePostingsForMatcher(ctx context.Context, ix IndexReader, m *labels.Ma
 	return it, it.Err()
 }
 
-func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, matchers ...*labels.Matcher) ([]string, error) {
-	allValues, err := r.LabelValues(ctx, name)
+func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
+	allValues, err := r.LabelValues(ctx, name, hints)
 	if err != nil {
 		return nil, fmt.Errorf("fetching values of label %s: %w", name, err)
 	}

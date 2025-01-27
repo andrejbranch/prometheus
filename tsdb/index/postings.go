@@ -168,9 +168,14 @@ func (p *MemPostings) LabelNames() []string {
 }
 
 // LabelValues returns label values for the given name.
-func (p *MemPostings) LabelValues(_ context.Context, name string) []string {
+func (p *MemPostings) LabelValues(_ context.Context, name string, hints *storage.LabelHints) []string {
 	p.mtx.RLock()
-	values := p.lvs[name]
+	var values []string
+	if hints.Limit == 0 {
+		values = p.lvs[name]
+	} else {
+		values = p.lvs[name][:hints.Limit]
+	}
 	p.mtx.RUnlock()
 
 	// The slice from p.lvs[name] is shared between all readers, and it is append-only.
