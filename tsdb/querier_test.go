@@ -2259,12 +2259,12 @@ func (m mockIndex) Close() error {
 }
 
 func (m mockIndex) SortedLabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, error) {
-	values, _ := m.LabelValues(ctx, name, matchers...)
+	values, _ := m.LabelValues(ctx, name, &storage.LabelHints{}, matchers...)
 	sort.Strings(values)
 	return values, nil
 }
 
-func (m mockIndex) LabelValues(_ context.Context, name string, matchers ...*labels.Matcher) ([]string, error) {
+func (m mockIndex) LabelValues(_ context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
 	var values []string
 
 	if len(matchers) == 0 {
@@ -3226,7 +3226,7 @@ func (m mockMatcherIndex) SortedLabelValues(context.Context, string, ...*labels.
 }
 
 // LabelValues will return error if it is called.
-func (m mockMatcherIndex) LabelValues(context.Context, string, ...*labels.Matcher) ([]string, error) {
+func (m mockMatcherIndex) LabelValues(context.Context, string, *storage.LabelHints, ...*labels.Matcher) ([]string, error) {
 	return []string{}, errors.New("label values called")
 }
 
@@ -3654,7 +3654,7 @@ func TestReader_PostingsForLabelMatchingHonorsContextCancel(t *testing.T) {
 
 	failAfter := uint64(mockReaderOfLabelsSeriesCount / 2 / checkContextEveryNIterations)
 	ctx := &testutil.MockContextErrAfter{FailAfter: failAfter}
-	_, err := labelValuesWithMatchers(ctx, ir, "__name__", labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".+"))
+	_, err := labelValuesWithMatchers(ctx, ir, "__name__", &storage.LabelHints{}, labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".+"))
 
 	require.Error(t, err)
 	require.Equal(t, failAfter+1, ctx.Count()) // Plus one for the Err() call that puts the error in the result.
@@ -3675,7 +3675,7 @@ type mockReaderOfLabels struct{}
 
 const mockReaderOfLabelsSeriesCount = checkContextEveryNIterations * 10
 
-func (m mockReaderOfLabels) LabelValues(context.Context, string, ...*labels.Matcher) ([]string, error) {
+func (m mockReaderOfLabels) LabelValues(context.Context, string, *storage.LabelHints, ...*labels.Matcher) ([]string, error) {
 	return make([]string, mockReaderOfLabelsSeriesCount), nil
 }
 

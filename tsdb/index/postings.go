@@ -142,12 +142,19 @@ func (p *MemPostings) LabelNames() []string {
 }
 
 // LabelValues returns label values for the given name.
-func (p *MemPostings) LabelValues(_ context.Context, name string) []string {
+func (p *MemPostings) LabelValues(_ context.Context, name string, hints *storage.LabelHints) []string {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
 
-	values := make([]string, 0, len(p.m[name]))
+	limit := len(p.m[name])
+	if hints != nil && hints.Limit != 0 {
+		limit = hints.Limit
+	}
+	values := make([]string, 0, limit)
 	for v := range p.m[name] {
+		if len(values) == limit {
+			break
+		}
 		values = append(values, v)
 	}
 	return values

@@ -77,8 +77,13 @@ func newBlockBaseQuerier(b BlockReader, mint, maxt int64) (*blockBaseQuerier, er
 	}, nil
 }
 
+func (q *blockBaseQuerier) SortedLabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
+	res, err := q.index.LabelValues(ctx, name, &storage.LabelHints{}, matchers...)
+	return res, nil, err
+}
+
 func (q *blockBaseQuerier) LabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
-	res, err := q.index.SortedLabelValues(ctx, name, matchers...)
+	res, err := q.index.LabelValues(ctx, name, hints, matchers...)
 	return res, nil, err
 }
 
@@ -359,7 +364,7 @@ func inversePostingsForMatcher(ctx context.Context, ix IndexReader, m *labels.Ma
 		return ix.Postings(ctx, m.Name, m.Value)
 	}
 
-	vals, err := ix.LabelValues(ctx, m.Name)
+	vals, err := ix.LabelValues(ctx, m.Name, &storage.LabelHints{})
 	if err != nil {
 		return nil, err
 	}
@@ -384,8 +389,10 @@ func inversePostingsForMatcher(ctx context.Context, ix IndexReader, m *labels.Ma
 	return ix.Postings(ctx, m.Name, res...)
 }
 
-func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, matchers ...*labels.Matcher) ([]string, error) {
-	allValues, err := r.LabelValues(ctx, name)
+func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
+	// TODO, this duplicated every value in to memory, change this to getting values in batches and match until we
+	// have exhausted all values or we reach the specified limit
+	allValues, err := r.LabelValues(ctx, name, &storage.LabelHints{})
 	if err != nil {
 		return nil, fmt.Errorf("fetching values of label %s: %w", name, err)
 	}

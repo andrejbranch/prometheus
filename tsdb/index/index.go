@@ -1510,7 +1510,8 @@ func (r *Reader) SymbolTableSize() uint64 {
 // It is not safe to use the return value beyond the lifetime of the byte slice
 // passed into the Reader.
 func (r *Reader) SortedLabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, error) {
-	values, err := r.LabelValues(ctx, name, matchers...)
+	// ignore limit for sorted label values
+	values, err := r.LabelValues(ctx, name, &storage.LabelHints{}, matchers...)
 	if err == nil && r.version == FormatV1 {
 		slices.Sort(values)
 	}
@@ -1521,9 +1522,13 @@ func (r *Reader) SortedLabelValues(ctx context.Context, name string, matchers ..
 // It is not safe to use the return value beyond the lifetime of the byte slice
 // passed into the Reader.
 // TODO(replay): Support filtering by matchers.
-func (r *Reader) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, error) {
+func (r *Reader) LabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
 	if len(matchers) > 0 {
 		return nil, fmt.Errorf("matchers parameter is not implemented: %+v", matchers)
+	}
+
+	if hints == nil {
+		hints = &storage.LabelHints{}
 	}
 
 	if r.version == FormatV1 {
@@ -1545,9 +1550,16 @@ func (r *Reader) LabelValues(ctx context.Context, name string, matchers ...*labe
 		return nil, nil
 	}
 
-	values := make([]string, 0, len(e)*symbolFactor)
+	valuesLength := len(e) * symbolFactor
+	if hints.Limit != 0 && valuesLength > hints.Limit {
+		valuesLength = hints.Limit * symbolFactor
+	}
+	values := make([]string, 0, valuesLength)
 	lastVal := e[len(e)-1].value
 	err := r.traversePostingOffsets(ctx, e[0].off, func(val string, _ uint64) (bool, error) {
+		if hints.Limit != 0 && len(values) == hints.Limit {
+			return false, nil
+		}
 		values = append(values, val)
 		return val != lastVal, nil
 	})
