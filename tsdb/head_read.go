@@ -64,7 +64,7 @@ func (h *headIndexReader) Symbols() index.StringIter {
 // If matchers are specified the returned result set is reduced
 // to label values of metrics matching the matchers.
 func (h *headIndexReader) SortedLabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, error) {
-	values, err := h.LabelValues(ctx, name, &storage.LabelHints{Limit: 10}, matchers...)
+	values, err := h.LabelValues(ctx, name, &storage.LabelHints{}, matchers...)
 	if err == nil {
 		slices.Sort(values)
 	}
@@ -85,6 +85,10 @@ func (h *headIndexReader) LabelValues(ctx context.Context, name string, hints *s
 	}
 
 	return labelValuesWithMatchers(ctx, h, name, hints, matchers...)
+}
+
+func (h *headIndexReader) LabelValuesIterator(ctx context.Context, name string) index.StringIter {
+	return h.head.postings.LabelValuesIterator(ctx, name)
 }
 
 // LabelNames returns all the unique label names present in the head

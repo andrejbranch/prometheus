@@ -50,6 +50,8 @@ const (
 	// FormatV3 represents version 3 of index.
 	FormatV3 = 3
 
+	DefaultIteratorBufferSize = 5000
+
 	indexFilename = "index"
 
 	seriesByteAlign = 16
@@ -1452,6 +1454,7 @@ func (s *symbolsIter) Next() bool {
 }
 
 func (s symbolsIter) At() string { return s.cur }
+
 func (s symbolsIter) Err() error { return s.err }
 
 // ReadPostingsOffsetTable reads the postings offset table and at the given position calls f for each
@@ -1564,6 +1567,25 @@ func (r *Reader) LabelValues(ctx context.Context, name string, hints *storage.La
 		return val != lastVal, nil
 	})
 	return values, err
+}
+
+func (r *Reader) LabelValuesIterator(ctx context.Context, name string) StringIter {
+	it := NewLabelValueIterator(ctx, name, func(it *LabelValueIterator) {
+		e, ok := r.postings[name]
+		if !ok {
+			return
+		}
+		if len(e) == 0 {
+			return
+		}
+		lastVal := e[len(e)-1].value
+		_ = r.traversePostingOffsets(it.ctx, e[0].off, func(val string, _ uint64) (bool, error) {
+			it.ch <- val
+			return val != lastVal, nil
+		})
+	})
+
+	return it
 }
 
 // LabelNamesFor returns all the label names for the series referred to by IDs.
@@ -2076,6 +2098,49 @@ func (dec *Decoder) Series(b []byte, builder *labels.ScratchBuilder, chks *[]chu
 		})
 	}
 	return d.Err()
+}
+
+type LabelValueIterator struct {
+	ctx      context.Context
+	name     string
+	curr     string
+	err      error
+	ch       chan string
+	initFunc func(*LabelValueIterator)
+}
+
+func NewLabelValueIterator(ctx context.Context, name string, initFunc func(it *LabelValueIterator)) *LabelValueIterator {
+	it := &LabelValueIterator{
+		ctx:      ctx,
+		name:     name,
+		initFunc: initFunc,
+		ch:       make(chan string, DefaultIteratorBufferSize),
+	}
+	go it.init()
+	return it
+}
+
+func (l *LabelValueIterator) init() {
+	defer close(l.ch)
+	l.initFunc(l)
+}
+
+func (l *LabelValueIterator) Next() bool {
+	select {
+	case val, ok := <-l.ch:
+		l.curr = val
+		return ok
+	case <-l.ctx.Done():
+		return false
+	}
+}
+
+func (l *LabelValueIterator) At() string {
+	return l.curr
+}
+
+func (l *LabelValueIterator) Err() error {
+	return l.err
 }
 
 func yoloString(b []byte) string {
