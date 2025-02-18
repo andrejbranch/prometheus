@@ -493,6 +493,8 @@ loop:
 		}
 	}
 
+	slices.Sort(values)
+
 	return values, nil
 }
 

@@ -81,7 +81,9 @@ func (h *headIndexReader) LabelValues(ctx context.Context, name string, hints *s
 	}
 
 	if len(matchers) == 0 {
-		return h.head.postings.LabelValues(ctx, name, hints), nil
+		values := h.head.postings.LabelValues(ctx, name, hints)
+		slices.Sort(values)
+		return values, nil
 	}
 
 	return labelValuesWithMatchers(ctx, h, name, hints, matchers...)
