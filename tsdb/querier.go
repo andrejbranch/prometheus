@@ -404,16 +404,19 @@ func nextBatch(it index.StringIter, size int) ([]string, error) {
 }
 
 func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
-	it := r.LabelValuesIterator(ctx, name)
+	var values []string
+
+	iterCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	it := r.LabelValuesIterator(iterCtx, name)
+
 	if it == nil {
-		return []string{}, nil
+		return values, nil
 	}
 
 	if hints == nil {
 		hints = &storage.LabelHints{}
 	}
-
-	var values []string
 
 loop:
 	for {
