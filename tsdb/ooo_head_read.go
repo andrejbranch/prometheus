@@ -488,10 +488,6 @@ func (ir *OOOCompactionHeadIndexReader) LabelValues(_ context.Context, name stri
 	return nil, errors.New("not implemented")
 }
 
-func (ir *OOOCompactionHeadIndexReader) LabelValuesIterator(ctx context.Context, name string) index.StringIter {
-	return nil
-}
-
 func (ir *OOOCompactionHeadIndexReader) PostingsForMatchers(_ context.Context, concurrent bool, ms ...*labels.Matcher) (index.Postings, error) {
 	return nil, errors.New("not implemented")
 }

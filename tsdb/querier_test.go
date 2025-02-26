@@ -2288,10 +2288,6 @@ func (m mockIndex) LabelValues(_ context.Context, name string, hints *storage.La
 	return values, nil
 }
 
-func (m mockIndex) LabelValuesIterator(ctx context.Context, name string) index.StringIter {
-	return nil
-}
-
 func (m mockIndex) LabelValueFor(_ context.Context, id storage.SeriesRef, label string) (string, error) {
 	return m.series[id].l.Get(label), nil
 }
@@ -3234,10 +3230,6 @@ func (m mockMatcherIndex) LabelValues(context.Context, string, *storage.LabelHin
 	return []string{}, errors.New("label values called")
 }
 
-func (m mockMatcherIndex) LabelValuesIterator(context.Context, string) index.StringIter {
-	return nil
-}
-
 func (m mockMatcherIndex) LabelValueFor(context.Context, storage.SeriesRef, string) (string, error) {
 	return "", errors.New("label value for called")
 }
@@ -3685,10 +3677,6 @@ const mockReaderOfLabelsSeriesCount = checkContextEveryNIterations * 10
 
 func (m mockReaderOfLabels) LabelValues(context.Context, string, *storage.LabelHints, ...*labels.Matcher) ([]string, error) {
 	return make([]string, mockReaderOfLabelsSeriesCount), nil
-}
-
-func (m mockReaderOfLabels) LabelValuesIterator(ctx context.Context, name string) index.StringIter {
-	return index.NewStringListIter(make([]string, mockReaderOfLabelsSeriesCount))
 }
 
 func (m mockReaderOfLabels) LabelValueFor(context.Context, storage.SeriesRef, string) (string, error) {

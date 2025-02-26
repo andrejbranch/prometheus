@@ -89,10 +89,6 @@ func (h *headIndexReader) LabelValues(ctx context.Context, name string, hints *s
 	return labelValuesWithMatchers(ctx, h, name, hints, matchers...)
 }
 
-func (h *headIndexReader) LabelValuesIterator(ctx context.Context, name string) index.StringIter {
-	return h.head.postings.LabelValuesIterator(ctx, name)
-}
-
 // LabelNames returns all the unique label names present in the head
 // that are within the time range mint to maxt.
 func (h *headIndexReader) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, error) {
