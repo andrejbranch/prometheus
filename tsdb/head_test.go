@@ -992,7 +992,7 @@ func TestHead_Truncate(t *testing.T) {
 			ss = map[string]struct{}{}
 			values[name] = ss
 		}
-		for _, value := range h.postings.LabelValues(ctx, name) {
+		for _, value := range h.postings.LabelValues(ctx, name, &storage.LabelHints{}) {
 			ss[value] = struct{}{}
 		}
 	}
@@ -2991,7 +2991,7 @@ func TestHeadLabelValuesWithMatchers(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedValues, actualValues)
 
-			actualValues, err = headIdxReader.LabelValues(ctx, tt.labelName, tt.matchers...)
+			actualValues, err = headIdxReader.LabelValues(ctx, tt.labelName, &storage.LabelHints{}, tt.matchers...)
 			sort.Strings(actualValues)
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedValues, actualValues)
@@ -3250,7 +3250,7 @@ func BenchmarkHeadLabelValuesWithMatchers(b *testing.B) {
 	b.ReportAllocs()
 
 	for benchIdx := 0; benchIdx < b.N; benchIdx++ {
-		actualValues, err := headIdxReader.LabelValues(ctx, "b_tens", matchers...)
+		actualValues, err := headIdxReader.LabelValues(ctx, "b_tens", &storage.LabelHints{}, matchers...)
 		require.NoError(b, err)
 		require.Len(b, actualValues, 9)
 	}

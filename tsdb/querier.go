@@ -77,8 +77,13 @@ func newBlockBaseQuerier(b BlockReader, mint, maxt int64) (*blockBaseQuerier, er
 	}, nil
 }
 
+func (q *blockBaseQuerier) SortedLabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
+	res, err := q.index.LabelValues(ctx, name, &storage.LabelHints{}, matchers...)
+	return res, nil, err
+}
+
 func (q *blockBaseQuerier) LabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
-	res, err := q.index.SortedLabelValues(ctx, name, matchers...)
+	res, err := q.index.LabelValues(ctx, name, hints, matchers...)
 	return res, nil, err
 }
 
@@ -390,8 +395,13 @@ func inversePostingsForMatcher(ctx context.Context, ix IndexReader, m *labels.Ma
 	return it, it.Err()
 }
 
-func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, matchers ...*labels.Matcher) ([]string, error) {
-	allValues, err := r.LabelValues(ctx, name)
+func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
+	if hints == nil {
+		hints = &storage.LabelHints{}
+	}
+
+	// Do not apply limits here. We need all values.
+	allValues, err := r.LabelValues(ctx, name, &storage.LabelHints{})
 	if err != nil {
 		return nil, fmt.Errorf("fetching values of label %s: %w", name, err)
 	}
@@ -451,7 +461,12 @@ func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, ma
 	values := make([]string, 0, len(indexes))
 	for _, idx := range indexes {
 		values = append(values, allValues[idx])
+		if hints.Limit > 0 && len(values) >= hints.Limit {
+			break
+		}
 	}
+
+	slices.Sort(values)
 
 	return values, nil
 }

@@ -176,16 +176,16 @@ type multiMeta struct {
 
 // LabelValues needs to be overridden from the headIndexReader implementation
 // so we can return labels within either in-order range or ooo range.
-func (oh *HeadAndOOOIndexReader) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, error) {
+func (oh *HeadAndOOOIndexReader) LabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
 	if oh.maxt < oh.head.MinTime() && oh.maxt < oh.head.MinOOOTime() || oh.mint > oh.head.MaxTime() && oh.mint > oh.head.MaxOOOTime() {
 		return []string{}, nil
 	}
 
 	if len(matchers) == 0 {
-		return oh.head.postings.LabelValues(ctx, name), nil
+		return oh.head.postings.LabelValues(ctx, name, hints), nil
 	}
 
-	return labelValuesWithMatchers(ctx, oh, name, matchers...)
+	return labelValuesWithMatchers(ctx, oh, name, hints, matchers...)
 }
 
 func lessByMinTimeAndMinRef(a, b chunks.Meta) int {
@@ -488,7 +488,7 @@ func (ir *OOOCompactionHeadIndexReader) SortedLabelValues(_ context.Context, nam
 	return nil, errors.New("not implemented")
 }
 
-func (ir *OOOCompactionHeadIndexReader) LabelValues(_ context.Context, name string, matchers ...*labels.Matcher) ([]string, error) {
+func (ir *OOOCompactionHeadIndexReader) LabelValues(_ context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
 	return nil, errors.New("not implemented")
 }
 

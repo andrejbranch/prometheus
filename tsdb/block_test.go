@@ -303,7 +303,7 @@ func TestLabelValuesWithMatchers(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedValues, actualValues)
 
-			actualValues, err = indexReader.LabelValues(ctx, tt.labelName, tt.matchers...)
+			actualValues, err = indexReader.LabelValues(ctx, tt.labelName, &storage.LabelHints{}, tt.matchers...)
 			sort.Strings(actualValues)
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedValues, actualValues)
@@ -459,7 +459,7 @@ func BenchmarkLabelValuesWithMatchers(b *testing.B) {
 	b.ReportAllocs()
 
 	for benchIdx := 0; benchIdx < b.N; benchIdx++ {
-		actualValues, err := indexReader.LabelValues(ctx, "b_tens", matchers...)
+		actualValues, err := indexReader.LabelValues(ctx, "b_tens", &storage.LabelHints{}, matchers...)
 		require.NoError(b, err)
 		require.Len(b, actualValues, 9)
 	}

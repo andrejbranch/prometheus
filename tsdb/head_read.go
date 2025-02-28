@@ -62,7 +62,7 @@ func (h *headIndexReader) Symbols() index.StringIter {
 // If matchers are specified the returned result set is reduced
 // to label values of metrics matching the matchers.
 func (h *headIndexReader) SortedLabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, error) {
-	values, err := h.LabelValues(ctx, name, matchers...)
+	values, err := h.LabelValues(ctx, name, &storage.LabelHints{}, matchers...)
 	if err == nil {
 		slices.Sort(values)
 	}
@@ -73,16 +73,18 @@ func (h *headIndexReader) SortedLabelValues(ctx context.Context, name string, ma
 // specific label name that are within the time range mint to maxt.
 // If matchers are specified the returned result set is reduced
 // to label values of metrics matching the matchers.
-func (h *headIndexReader) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, error) {
+func (h *headIndexReader) LabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
 	if h.maxt < h.head.MinTime() || h.mint > h.head.MaxTime() {
 		return []string{}, nil
 	}
 
 	if len(matchers) == 0 {
-		return h.head.postings.LabelValues(ctx, name), nil
+		values := h.head.postings.LabelValues(ctx, name, hints)
+		slices.Sort(values)
+		return values, nil
 	}
 
-	return labelValuesWithMatchers(ctx, h, name, matchers...)
+	return labelValuesWithMatchers(ctx, h, name, hints, matchers...)
 }
 
 // LabelNames returns all the unique label names present in the head
