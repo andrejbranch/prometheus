@@ -184,6 +184,29 @@ func (p *MemPostings) LabelValues(_ context.Context, name string, hints *storage
 	return slices.Clone(values)
 }
 
+// LabelValuesIterator returns a label values iterator for the given name.
+func (p *MemPostings) LabelValuesIterator(ctx context.Context, name string) StringIter {
+	return NewLabelValueIterator(ctx, name, func(it *LabelValueIterator) {
+		p.mtx.RLock()
+		e, ok := p.lvs[name]
+		p.mtx.RUnlock()
+
+		if !ok {
+			return
+		}
+		if len(e) == 0 {
+			return
+		}
+		for _, value := range e {
+			select {
+			case it.ch <- value:
+			case <-it.ctx.Done():
+				return
+			}
+		}
+	})
+}
+
 // PostingsStats contains cardinality based statistics for postings.
 type PostingsStats struct {
 	CardinalityMetricsStats []Stat
