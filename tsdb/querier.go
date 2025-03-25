@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"time"
 
 	"github.com/oklog/ulid"
 
@@ -35,6 +36,8 @@ import (
 
 // checkContextEveryNIterations is used in some tight loops to check if the context is done.
 const checkContextEveryNIterations = 100
+
+const LabelValuesDeadlineContextKey = "label_values_deadline"
 
 type blockBaseQuerier struct {
 	blockID    ulid.ULID
@@ -407,6 +410,8 @@ func nextBatch(it index.StringIter, size int) ([]string, error) {
 func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
 	var values []string
 
+	startTime := time.Now()
+
 	iterCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	it := r.LabelValuesIterator(iterCtx, name)
@@ -417,6 +422,11 @@ func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, hi
 
 loop:
 	for {
+		// If a deadline is specified return what we have once deadline is reached
+		if hints != nil && hints.ValuesDeadline > 0 && time.Since(startTime) >= hints.ValuesDeadline {
+			return values, nil
+		}
+
 		// Limit is applied at the end, after filtering.
 		allValues, err := nextBatch(it, index.DefaultIteratorBufferSize)
 

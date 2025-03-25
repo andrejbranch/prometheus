@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
@@ -231,6 +232,9 @@ type SelectHints struct {
 type LabelHints struct {
 	// Maximum number of results returned. Use a value of 0 to disable.
 	Limit int
+
+	// Deadline for labelValuesWithMatchers
+	ValuesDeadline time.Duration
 }
 
 // QueryableFunc is an adapter to allow the use of ordinary functions as
