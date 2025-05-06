@@ -1560,10 +1560,18 @@ func (r *Reader) LabelValuesIterator(ctx context.Context, name string) StringIte
 			return
 		}
 		lastVal := e[len(e)-1].value
-		_ = r.traversePostingOffsets(it.ctx, e[0].off, func(val string, _ uint64) (bool, error) {
-			it.ch <- val
-			return val != lastVal, nil
+		done := it.ctx.Done()
+		err := r.traversePostingOffsets(it.ctx, e[0].off, func(val string, _ uint64) (bool, error) {
+			select {
+			case <-done:
+				return false, it.ctx.Err()
+			case it.ch <- val:
+				return val != lastVal, nil
+			}
 		})
+		if err != nil {
+			it.err = err
+		}
 	})
 
 	return it
@@ -2113,7 +2121,15 @@ func NewLabelValueIterator(ctx context.Context, name string, initFunc func(it *L
 
 func (l *LabelValueIterator) init() {
 	defer close(l.ch)
-	l.initFunc(l)
+	for {
+		select {
+		case <-l.ctx.Done():
+			return
+		default:
+			l.initFunc(l)
+			return
+		}
+	}
 }
 
 func (l *LabelValueIterator) Next() bool {
@@ -2122,6 +2138,12 @@ func (l *LabelValueIterator) Next() bool {
 		l.curr = val
 		return ok
 	case <-l.ctx.Done():
+		l.err = l.ctx.Err()
+		// Drain the channel
+		go func() {
+			for range l.ch {
+			}
+		}()
 		return false
 	}
 }
