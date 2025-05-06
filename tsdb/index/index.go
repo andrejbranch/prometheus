@@ -2113,7 +2113,7 @@ func NewLabelValueIterator(ctx context.Context, name string, initFunc func(it *L
 		ctx:      ctx,
 		name:     name,
 		initFunc: initFunc,
-		ch:       make(chan string, DefaultIteratorBufferSize),
+		ch:       make(chan string),
 	}
 	go it.init()
 	return it
