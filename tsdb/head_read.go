@@ -85,8 +85,8 @@ func (h *headIndexReader) LabelValues(ctx context.Context, name string, hints *s
 	return labelValuesWithMatchers(ctx, h, name, hints, matchers...)
 }
 
-func (h *headIndexReader) LabelValuesIterator(ctx context.Context, name string) index.StringIter {
-	return h.head.postings.LabelValuesIterator(ctx, name)
+func (h *headIndexReader) LabelValuesBatchIterator(ctx context.Context, name string, batchSize int) index.BatchStringIter {
+	return h.head.postings.LabelValuesBatchIterator(ctx, name, batchSize)
 }
 
 // LabelNames returns all the unique label names present in the head

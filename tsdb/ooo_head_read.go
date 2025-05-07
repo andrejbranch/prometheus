@@ -492,7 +492,7 @@ func (ir *OOOCompactionHeadIndexReader) LabelValues(_ context.Context, name stri
 	return nil, errors.New("not implemented")
 }
 
-func (ir *OOOCompactionHeadIndexReader) LabelValuesIterator(_ context.Context, _ string) index.StringIter {
+func (ir *OOOCompactionHeadIndexReader) LabelValuesBatchIterator(_ context.Context, _ string, _ int) index.BatchStringIter {
 	return nil
 }
 

@@ -50,7 +50,7 @@ const (
 	// FormatV3 represents version 3 of index.
 	FormatV3 = 3
 
-	DefaultIteratorBufferSize = 1000
+	DefaultIteratorBatchSize = 100
 
 	indexFilename = "index"
 
@@ -1093,6 +1093,18 @@ type StringIter interface {
 	Err() error
 }
 
+// BatchStringIter iterates over batches of string lists.
+type BatchStringIter interface {
+	// Next advances the iterator and returns true if another list of strings was found.
+	Next() bool
+
+	// At returns the value at the current iterator position.
+	At() []string
+
+	// Err returns the last error of the iterator.
+	Err() error
+}
+
 type Reader struct {
 	b   ByteSlice
 	toc *TOC
@@ -1550,31 +1562,21 @@ func (r *Reader) LabelValues(ctx context.Context, name string, hints *storage.La
 	return values, err
 }
 
-func (r *Reader) LabelValuesIterator(ctx context.Context, name string) StringIter {
-	it := NewLabelValueIterator(ctx, name, func(it *LabelValueIterator) {
-		e, ok := r.postings[name]
+func (r *Reader) LabelValuesBatchIterator(ctx context.Context, name string, batchSize int) BatchStringIter {
+	// Batching is not supported for V1, but we implement the batching for consistency.
+	if r.version == FormatV1 {
+		e, ok := r.postingsV1[name]
 		if !ok {
-			return
+			return nil
 		}
-		if len(e) == 0 {
-			return
-		}
-		lastVal := e[len(e)-1].value
-		done := it.ctx.Done()
-		err := r.traversePostingOffsets(it.ctx, e[0].off, func(val string, _ uint64) (bool, error) {
-			select {
-			case <-done:
-				return false, it.ctx.Err()
-			case it.ch <- val:
-				return val != lastVal, nil
-			}
-		})
-		if err != nil {
-			it.err = err
-		}
-	})
+		return NewReaderV1LabelValuesIterator(ctx, e)
+	}
 
-	return it
+	e, ok := r.postings[name]
+	if !ok || len(e) == 0 {
+		return nil
+	}
+	return NewReaderLabelValuesIterator(ctx, r, e, batchSize)
 }
 
 // LabelNamesFor returns all the label names for the series referred to by IDs.
@@ -2099,63 +2101,112 @@ func (dec *Decoder) Series(b []byte, builder *labels.ScratchBuilder, chks *[]chu
 	return d.Err()
 }
 
-type LabelValueIterator struct {
-	ctx      context.Context
-	name     string
-	curr     string
-	err      error
-	ch       chan string
-	initFunc func(*LabelValueIterator)
+func yoloString(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
-func NewLabelValueIterator(ctx context.Context, name string, initFunc func(it *LabelValueIterator)) *LabelValueIterator {
-	it := &LabelValueIterator{
-		ctx:      ctx,
-		name:     name,
-		initFunc: initFunc,
-		ch:       make(chan string),
-	}
-	go it.init()
-	return it
+type ReaderLabelValuesIterator struct {
+	ctx       context.Context
+	reader    *Reader
+	batch     []string
+	skip      int
+	batchSize int
+	lastValue string
+	err       error
+	buf       encoding.Decbuf
 }
 
-func (l *LabelValueIterator) init() {
-	defer close(l.ch)
-	for {
-		select {
-		case <-l.ctx.Done():
-			return
-		default:
-			l.initFunc(l)
-			return
-		}
+func NewReaderLabelValuesIterator(ctx context.Context, reader *Reader, values []postingOffset, batchSize int) *ReaderLabelValuesIterator {
+	buf := encoding.NewDecbufAt(reader.b, int(reader.toc.PostingsTable), nil)
+	buf.Skip(values[0].off)
+	return &ReaderLabelValuesIterator{
+		ctx:       ctx,
+		reader:    reader,
+		batchSize: batchSize,
+		lastValue: values[len(values)-1].value,
+		batch:     make([]string, min(batchSize, len(values))),
+		buf:       buf,
 	}
 }
 
-func (l *LabelValueIterator) Next() bool {
-	select {
-	case val, ok := <-l.ch:
-		l.curr = val
-		return ok
-	case <-l.ctx.Done():
-		l.err = l.ctx.Err()
-		// Drain the channel
-		go func() {
-			for range l.ch {
-			}
-		}()
+func (l *ReaderLabelValuesIterator) Next() bool {
+	if l.lastValue == l.batch[len(l.batch)-1] {
 		return false
 	}
+
+	l.batch = l.batch[:0]
+
+	for l.buf.Err() == nil && l.ctx.Err() == nil {
+		if l.skip == 0 {
+			// These are always the same number of bytes,
+			// and it's faster to skip than to parse.
+			l.skip = l.buf.Len()
+			l.buf.Uvarint()      // Keycount.
+			l.buf.UvarintBytes() // Label name.
+			l.skip -= l.buf.Len()
+		} else {
+			l.buf.Skip(l.skip)
+		}
+		v := yoloString(l.buf.UvarintBytes()) // Label value.
+		_ = l.buf.Uvarint64()                 // Offset.
+		l.batch = append(l.batch, v)
+		if len(l.batch) == l.batchSize || v == l.lastValue {
+			break
+		}
+	}
+	if l.buf.Err() != nil {
+		l.err = l.buf.Err()
+	}
+	if l.ctx.Err() != nil {
+		l.err = l.ctx.Err()
+	}
+
+	if len(l.batch) == 0 {
+		return false
+	}
+
+	return true
 }
 
-func (l *LabelValueIterator) At() string {
-	return l.curr
+func (l *ReaderLabelValuesIterator) At() []string {
+	return l.batch
 }
 
-func (l *LabelValueIterator) Err() error {
+func (l *ReaderLabelValuesIterator) Err() error {
 	return l.err
 }
 
-func yoloString(b []byte) string {
-	return unsafe.String(unsafe.SliceData(b), len(b))
+type ReaderV1LabelValuesIterator struct {
+	ctx    context.Context
+	values map[string]uint64
+	done   bool
+}
+
+func NewReaderV1LabelValuesIterator(ctx context.Context, values map[string]uint64) *ReaderV1LabelValuesIterator {
+	it := &ReaderV1LabelValuesIterator{
+		ctx:    ctx,
+		values: values,
+	}
+	return it
+}
+
+func (l *ReaderV1LabelValuesIterator) Next() bool {
+	// Batching is not supported for v1 format.
+	if l.values == nil || l.done {
+		return false
+	}
+	l.done = true
+	return true
+}
+
+func (l *ReaderV1LabelValuesIterator) At() []string {
+	var values []string
+	for k := range l.values {
+		values = append(values, k)
+	}
+	return values
+}
+
+func (l *ReaderV1LabelValuesIterator) Err() error {
+	return l.ctx.Err()
 }

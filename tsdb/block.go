@@ -72,8 +72,8 @@ type IndexReader interface {
 	// LabelValues returns possible label values which may not be sorted.
 	LabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error)
 
-	// LabelValuesIterator returns unsorted label values iterator.
-	LabelValuesIterator(ctx context.Context, name string) index.StringIter
+	// LabelValuesBatchIterator returns an iterator for traversing label values in fixed-size batches.
+	LabelValuesBatchIterator(ctx context.Context, name string, batchSize int) index.BatchStringIter
 
 	// Postings returns the postings list iterator for the label pairs.
 	// The Postings here contain the offsets to the series inside the index.
@@ -518,8 +518,8 @@ func (r blockIndexReader) LabelValues(ctx context.Context, name string, hints *s
 	return labelValuesWithMatchers(ctx, r.ir, name, hints, matchers...)
 }
 
-func (r blockIndexReader) LabelValuesIterator(_ context.Context, _ string) index.StringIter {
-	return nil
+func (r blockIndexReader) LabelValuesBatchIterator(ctx context.Context, name string, batchSize int) index.BatchStringIter {
+	return r.ir.LabelValuesBatchIterator(ctx, name, batchSize)
 }
 
 func (r blockIndexReader) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, error) {

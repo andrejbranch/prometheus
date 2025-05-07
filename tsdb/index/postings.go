@@ -184,27 +184,17 @@ func (p *MemPostings) LabelValues(_ context.Context, name string, hints *storage
 	return slices.Clone(values)
 }
 
-// LabelValuesIterator returns a label values iterator for the given name.
-func (p *MemPostings) LabelValuesIterator(ctx context.Context, name string) StringIter {
-	return NewLabelValueIterator(ctx, name, func(it *LabelValueIterator) {
-		p.mtx.RLock()
-		e, ok := p.lvs[name]
-		p.mtx.RUnlock()
+// LabelValuesBatchIterator returns a label values iterator for the given name.
+func (p *MemPostings) LabelValuesBatchIterator(ctx context.Context, name string, batchSize int) BatchStringIter {
+	p.mtx.RLock()
+	values := p.lvs[name]
+	p.mtx.RUnlock()
 
-		if !ok {
-			return
-		}
-		if len(e) == 0 {
-			return
-		}
-		for _, value := range e {
-			select {
-			case it.ch <- value:
-			case <-it.ctx.Done():
-				return
-			}
-		}
-	})
+	if len(values) == 0 {
+		return nil
+	}
+
+	return NewPostingsLabelValueBatchIterator(ctx, values, batchSize)
 }
 
 // PostingsStats contains cardinality based statistics for postings.
@@ -1055,4 +1045,40 @@ func (h *postingsWithIndexHeap) Pop() interface{} {
 	x := old[n-1]
 	*h = old[0 : n-1]
 	return x
+}
+
+type PostingsLabelValueBatchIterator struct {
+	ctx       context.Context
+	curr      int
+	batchSize int
+	values    []string
+}
+
+func NewPostingsLabelValueBatchIterator(ctx context.Context, values []string, batchSize int) *PostingsLabelValueBatchIterator {
+	// Adjust batch size based on the number of values.
+	if len(values) < batchSize {
+		batchSize = len(values)
+	}
+	it := &PostingsLabelValueBatchIterator{
+		ctx:       ctx,
+		batchSize: batchSize,
+		values:    values,
+	}
+	return it
+}
+
+func (l *PostingsLabelValueBatchIterator) Next() bool {
+	return l.curr < len(l.values)
+}
+
+func (l *PostingsLabelValueBatchIterator) At() []string {
+	toIndex := min(l.curr+l.batchSize, len(l.values))
+	defer func() {
+		l.curr = toIndex
+	}()
+	return l.values[l.curr:toIndex]
+}
+
+func (l *PostingsLabelValueBatchIterator) Err() error {
+	return l.ctx.Err()
 }

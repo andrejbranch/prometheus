@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"time"
 
 	"github.com/oklog/ulid"
 
@@ -393,49 +392,33 @@ func inversePostingsForMatcher(ctx context.Context, ix IndexReader, m *labels.Ma
 	return it, it.Err()
 }
 
-func nextBatch(it index.StringIter, size int) ([]string, error) {
-	var res []string
-	for it.Next() {
-		if it.Err() != nil {
-			return res, it.Err()
-		}
-		res = append(res, it.At())
-		if len(res) >= size {
-			break
-		}
-	}
-	return res, it.Err()
-}
-
 func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
-	var values []string
+	var (
+		values         []string
+		p              index.Postings
+		valuesPostings []index.Postings
+		err            error
+	)
 
-	startTime := time.Now()
-
-	iterCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	it := r.LabelValuesIterator(iterCtx, name)
-
-	if it == nil {
+	batchIt := r.LabelValuesBatchIterator(ctx, name, index.DefaultIteratorBatchSize)
+	if batchIt == nil {
 		return values, nil
 	}
 
+	// Pre-allocate filteredValues with batch size
+	filteredValues := make([]string, 0, index.DefaultIteratorBatchSize)
+
 loop:
-	for {
-		// If a deadline is specified return what we have once deadline is reached
-		if hints != nil && hints.ValuesDeadline > 0 && time.Since(startTime) >= hints.ValuesDeadline {
-			return values, nil
+	for batchIt.Next() {
+		if batchIt.Err() != nil {
+			return nil, batchIt.Err()
 		}
 
 		// Limit is applied at the end, after filtering.
-		allValues, err := nextBatch(it, index.DefaultIteratorBufferSize)
+		batchValues := batchIt.At()
 
-		if len(allValues) == 0 {
+		if len(batchValues) == 0 {
 			break loop
-		}
-
-		if err != nil {
-			return nil, fmt.Errorf("fetching values of label %s: %w", name, err)
 		}
 
 		// If we have a matcher for the label name, we can filter out values that don't match
@@ -448,11 +431,11 @@ loop:
 				continue
 			}
 
-			// re-use the allValues slice to avoid allocations
+			// re-use the batchValues slice to avoid allocations
 			// this is safe because the iteration is always ahead of the append
-			filteredValues := allValues[:0]
+			filteredValues = filteredValues[:0]
 			count := 1
-			for _, v := range allValues {
+			for _, v := range batchValues {
 				if count%checkContextEveryNIterations == 0 && ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
@@ -461,16 +444,16 @@ loop:
 					filteredValues = append(filteredValues, v)
 				}
 			}
-			allValues = filteredValues
+			batchValues = filteredValues
 		}
 
-		if len(allValues) == 0 {
+		if len(batchValues) == 0 {
 			continue
 		}
 
 		// If we don't have any matchers for other labels, then we're done with this batch.
 		if !hasMatchersForOtherLabels {
-			for _, v := range allValues {
+			for _, v := range batchValues {
 				values = append(values, v)
 				if hints != nil && hints.Limit > 0 && len(values) >= hints.Limit {
 					break loop
@@ -479,25 +462,36 @@ loop:
 			continue
 		}
 
-		p, err := PostingsForMatchers(ctx, r, matchers...)
-		if err != nil {
-			return nil, fmt.Errorf("fetching postings for matchers: %w", err)
+		// We can reuse postings for matchers for each batch of values.
+		if p == nil {
+			p, err = PostingsForMatchers(ctx, r, matchers...)
+			if err != nil {
+				return nil, fmt.Errorf("fetching postings for matchers: %w", err)
+			}
 		}
 
-		valuesPostings := make([]index.Postings, len(allValues))
-		for i, value := range allValues {
+		if cap(valuesPostings) < len(batchValues) {
+			valuesPostings = make([]index.Postings, len(batchValues))
+		}
+
+		// Resize to current batch size
+		valuesPostings = valuesPostings[:len(batchValues)]
+
+		// Fetch values postings for this batch
+		for i, value := range batchValues {
 			valuesPostings[i], err = r.Postings(ctx, name, value)
 			if err != nil {
 				return nil, fmt.Errorf("fetching postings for %s=%q: %w", name, value, err)
 			}
 		}
+
 		indexes, err := index.FindIntersectingPostings(p, valuesPostings)
 		if err != nil {
 			return nil, fmt.Errorf("intersecting postings: %w", err)
 		}
 
 		for _, idx := range indexes {
-			values = append(values, allValues[idx])
+			values = append(values, batchValues[idx])
 			if hints != nil && hints.Limit > 0 && len(values) >= hints.Limit {
 				break loop
 			}

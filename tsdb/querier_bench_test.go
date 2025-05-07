@@ -16,8 +16,11 @@ package tsdb
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
@@ -349,4 +352,123 @@ func BenchmarkQuerierSelectWithOutOfOrder(b *testing.B) {
 	b.Run("Head", func(b *testing.B) {
 		benchmarkSelect(b, db, numSeries, false)
 	})
+}
+
+func BenchmarkLabelValuesWithLimits(b *testing.B) {
+	// Number of concurrent goroutines to simulate multiple LabelValues queries.
+	const numWorkers = 10
+	// Number of series to pre-populate the TSDB.
+	const numSeries = 100000
+	// Number of unique values for the "large_label" (to simulate 100k values).
+	const numLargeLabelValues = 100000
+	// Number of unique values for the "small_label" (to simulate few values).
+	const numSmallLabelValues = 10
+
+	// Setup: Pre-populate the TSDB with series.
+	db := openTestDB(b, DefaultOptions(), nil)
+	h := db.Head()
+	b.Cleanup(func() {
+		require.NoError(b, db.Close())
+	})
+
+	// Pre-populate series with two labels: "large_label" (100k values) and "small_label" (10 values).
+	app := h.Appender(context.Background())
+	for i := 0; i < numSeries; i++ {
+		lbls := labels.FromStrings(
+			labels.MetricName, "metric",
+			"large_label", "value_"+string(rune(i%numLargeLabelValues)),
+			"small_label", "value_"+string(rune(i%numSmallLabelValues)),
+			"always_0", "0",
+		)
+		_, err := app.Append(0, lbls, 0, 0)
+		require.NoError(b, err)
+	}
+	require.NoError(b, app.Commit())
+
+	// Test cases: Different matchers and labels.
+	testCases := []struct {
+		name      string
+		label     string
+		matchers  []*labels.Matcher
+		limit     int
+		expectLen int
+	}{
+		{
+			name:  "large_label_no_matchers_limit_10",
+			label: "large_label",
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchNotEqual, "always_0", "0"), // Matches no series.
+			},
+			limit:     10,
+			expectLen: 0,
+		},
+		{
+			name:  "large_label_with_matchers_limit_1000",
+			label: "large_label",
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "metric"), // Matches all series.
+			},
+			limit:     1000,
+			expectLen: 1000,
+		},
+		{
+			name:  "large_label_with_matchers_limit_10",
+			label: "large_label",
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "metric"), // Matches all series.
+			},
+			limit:     10,
+			expectLen: 10,
+		},
+		{
+			name:  "small_label_no_matchers_limit_5",
+			label: "small_label",
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchNotEqual, "always_0", "0"), // Matches no series.
+			},
+			limit:     5,
+			expectLen: 0,
+		},
+		{
+			name:  "small_label_with_matchers_limit_5",
+			label: "small_label",
+			matchers: []*labels.Matcher{
+				labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "metric"), // Matches all series.
+			},
+			limit:     5,
+			expectLen: 5,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		b.Run(tc.name, func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var wg sync.WaitGroup
+				wg.Add(numWorkers)
+				for w := 0; w < numWorkers; w++ {
+					go func() {
+						defer wg.Done()
+						ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+						defer cancel()
+
+						q, err := db.Querier(math.MinInt64, math.MaxInt64)
+						require.NoError(b, err)
+
+						// Use LabelHints with a limit.
+						hints := &storage.LabelHints{Limit: tc.limit}
+
+						// Call LabelValues with the correct signature.
+						values, warnings, err := q.LabelValues(ctx, tc.label, hints, tc.matchers...)
+						require.NoError(b, err)
+						require.Empty(b, warnings, "Expected no warnings")
+
+						require.Len(b, values, tc.expectLen)
+					}()
+				}
+				wg.Wait()
+			}
+		})
+	}
 }
