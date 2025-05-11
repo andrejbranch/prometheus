@@ -932,7 +932,7 @@ func (it *bigEndianPostings) Err() error {
 // if intersection is non empty, then i is added to the indexes returned.
 // Returned indexes are not sorted.
 func FindIntersectingPostings(p Postings, candidates []Postings) (indexes []int, err error) {
-	h := make(postingsWithIndexHeap, 0, len(candidates))
+	h := make(PostingsWithIndexHeap, 0, len(candidates))
 	for idx, it := range candidates {
 		switch {
 		case it.Next():
@@ -960,6 +960,36 @@ func FindIntersectingPostings(p Postings, candidates []Postings) (indexes []int,
 	return indexes, nil
 }
 
+func FindIntersectingPostingsWithReuse(p Postings, candidates []Postings, h *PostingsWithIndexHeap, indexes *[]int) ([]int, error) {
+	*h = (*h)[:0]
+	for idx, it := range candidates {
+		switch {
+		case it.Next():
+			*h = append(*h, postingsWithIndex{index: idx, p: it})
+		case it.Err() != nil:
+			return nil, it.Err()
+		}
+	}
+	if h.empty() {
+		return nil, nil
+	}
+	heap.Init(h)
+
+	*indexes = (*indexes)[:0]
+	for !h.empty() {
+		if !p.Seek(h.at()) {
+			return *indexes, p.Err()
+		}
+		if p.At() == h.at() {
+			*indexes = append(*indexes, h.popIndex())
+		} else if err := h.next(); err != nil {
+			return nil, err
+		}
+	}
+
+	return *indexes, nil
+}
+
 // postingsWithIndex is used as postingsWithIndexHeap elements by FindIntersectingPostings,
 // keeping track of the original index of each postings while they move inside the heap.
 type postingsWithIndex struct {
@@ -970,14 +1000,14 @@ type postingsWithIndex struct {
 	popped bool
 }
 
-// postingsWithIndexHeap implements heap.Interface,
+// PostingsWithIndexHeap implements heap.Interface,
 // with root always pointing to the postings with minimum Postings.At() value.
 // It also implements a special way of removing elements that marks them as popped and moves them to the bottom of the
 // heap instead of actually removing them, see popIndex() for more details.
-type postingsWithIndexHeap []postingsWithIndex
+type PostingsWithIndexHeap []postingsWithIndex
 
 // empty checks whether the heap is empty, which is true if it has no elements, of if the smallest element is popped.
-func (h *postingsWithIndexHeap) empty() bool {
+func (h *PostingsWithIndexHeap) empty() bool {
 	return len(*h) == 0 || (*h)[0].popped
 }
 
@@ -985,7 +1015,7 @@ func (h *postingsWithIndexHeap) empty() bool {
 // In our implementation we don't actually do heap.Pop(), instead we mark the element as `popped` and fix its position, which
 // should be after all the non-popped elements according to our sorting strategy.
 // By skipping the `heap.Pop()` call we avoid an extra allocation in this heap's Pop() implementation which returns an interface{}.
-func (h *postingsWithIndexHeap) popIndex() int {
+func (h *PostingsWithIndexHeap) popIndex() int {
 	index := (*h)[0].index
 	(*h)[0].popped = true
 	heap.Fix(h, 0)
@@ -993,13 +1023,13 @@ func (h *postingsWithIndexHeap) popIndex() int {
 }
 
 // at provides the storage.SeriesRef where root Postings is pointing at this moment.
-func (h postingsWithIndexHeap) at() storage.SeriesRef { return h[0].p.At() }
+func (h PostingsWithIndexHeap) at() storage.SeriesRef { return h[0].p.At() }
 
 // next performs the Postings.Next() operation on the root of the heap, performing the related operation on the heap
 // and conveniently returning the result of calling Postings.Err() if the result of calling Next() was false.
 // If Next() succeeds, heap is fixed to move the root to its new position, according to its Postings.At() value.
 // If Next() returns fails and there's no error reported by Postings.Err(), then root is marked as removed and heap is fixed.
-func (h *postingsWithIndexHeap) next() error {
+func (h *PostingsWithIndexHeap) next() error {
 	pi := (*h)[0]
 	next := pi.p.Next()
 	if next {
@@ -1017,11 +1047,11 @@ func (h *postingsWithIndexHeap) next() error {
 // Len implements heap.Interface.
 // Notice that Len() > 0 does not imply that heap is not empty as elements are not removed from this heap.
 // Use empty() to check whether heap is empty or not.
-func (h postingsWithIndexHeap) Len() int { return len(h) }
+func (h PostingsWithIndexHeap) Len() int { return len(h) }
 
 // Less implements heap.Interface, it puts all the popped elements at the bottom,
 // and then sorts by Postings.At() property of each node.
-func (h postingsWithIndexHeap) Less(i, j int) bool {
+func (h PostingsWithIndexHeap) Less(i, j int) bool {
 	if h[i].popped != h[j].popped {
 		return h[j].popped
 	}
@@ -1029,17 +1059,17 @@ func (h postingsWithIndexHeap) Less(i, j int) bool {
 }
 
 // Swap implements heap.Interface.
-func (h *postingsWithIndexHeap) Swap(i, j int) { (*h)[i], (*h)[j] = (*h)[j], (*h)[i] }
+func (h *PostingsWithIndexHeap) Swap(i, j int) { (*h)[i], (*h)[j] = (*h)[j], (*h)[i] }
 
 // Push implements heap.Interface.
-func (h *postingsWithIndexHeap) Push(x interface{}) {
+func (h *PostingsWithIndexHeap) Push(x interface{}) {
 	*h = append(*h, x.(postingsWithIndex))
 }
 
 // Pop implements heap.Interface and pops the last element, which is NOT the min element,
 // so this doesn't return the same heap.Pop()
 // Although this method is implemented for correctness, we don't expect it to be used, see popIndex() method for details.
-func (h *postingsWithIndexHeap) Pop() interface{} {
+func (h *PostingsWithIndexHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]

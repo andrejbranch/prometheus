@@ -1098,7 +1098,7 @@ type BatchStringIter interface {
 	// Next advances the iterator and returns true if another list of strings was found.
 	Next() bool
 
-	// At returns the value at the current iterator position.
+	// At returns the current list of strings.
 	At() []string
 
 	// Err returns the last error of the iterator.
@@ -2161,11 +2161,7 @@ func (l *ReaderLabelValuesIterator) Next() bool {
 		l.err = l.ctx.Err()
 	}
 
-	if len(l.batch) == 0 {
-		return false
-	}
-
-	return true
+	return len(l.batch) > 0
 }
 
 func (l *ReaderLabelValuesIterator) At() []string {

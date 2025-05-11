@@ -1202,7 +1202,7 @@ func (p *postingsFailingAfterNthCall) Err() error {
 
 func TestPostingsWithIndexHeap(t *testing.T) {
 	t.Run("iterate", func(t *testing.T) {
-		h := postingsWithIndexHeap{
+		h := PostingsWithIndexHeap{
 			{index: 0, p: NewListPostings([]storage.SeriesRef{10, 20, 30})},
 			{index: 1, p: NewListPostings([]storage.SeriesRef{1, 5})},
 			{index: 2, p: NewListPostings([]storage.SeriesRef{25, 50})},
@@ -1220,7 +1220,7 @@ func TestPostingsWithIndexHeap(t *testing.T) {
 	})
 
 	t.Run("pop", func(t *testing.T) {
-		h := postingsWithIndexHeap{
+		h := PostingsWithIndexHeap{
 			{index: 0, p: NewListPostings([]storage.SeriesRef{10, 20, 30})},
 			{index: 1, p: NewListPostings([]storage.SeriesRef{1, 5})},
 			{index: 2, p: NewListPostings([]storage.SeriesRef{25, 50})},

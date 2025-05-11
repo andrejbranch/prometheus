@@ -36,8 +36,6 @@ import (
 // checkContextEveryNIterations is used in some tight loops to check if the context is done.
 const checkContextEveryNIterations = 100
 
-const LabelValuesDeadlineContextKey = "label_values_deadline"
-
 type blockBaseQuerier struct {
 	blockID    ulid.ULID
 	index      IndexReader
@@ -393,20 +391,20 @@ func inversePostingsForMatcher(ctx context.Context, ix IndexReader, m *labels.Ma
 }
 
 func labelValuesWithMatchers(ctx context.Context, r IndexReader, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, error) {
-	var (
-		values         []string
-		p              index.Postings
-		valuesPostings []index.Postings
-		err            error
-	)
-
 	batchIt := r.LabelValuesBatchIterator(ctx, name, index.DefaultIteratorBatchSize)
 	if batchIt == nil {
-		return values, nil
+		return nil, nil
 	}
 
-	// Pre-allocate filteredValues with batch size
-	filteredValues := make([]string, 0, index.DefaultIteratorBatchSize)
+	var (
+		values              []string
+		postingsForMatchers index.Postings
+		indexHeap           = make(index.PostingsWithIndexHeap, 0, index.DefaultIteratorBatchSize)
+		valuesPostings      = make([]index.Postings, index.DefaultIteratorBatchSize)
+		indexes             = make([]int, 0, index.DefaultIteratorBatchSize)
+		filteredValues      = make([]string, 0, index.DefaultIteratorBatchSize)
+		err                 error
+	)
 
 loop:
 	for batchIt.Next() {
@@ -414,7 +412,6 @@ loop:
 			return nil, batchIt.Err()
 		}
 
-		// Limit is applied at the end, after filtering.
 		batchValues := batchIt.At()
 
 		if len(batchValues) == 0 {
@@ -431,8 +428,6 @@ loop:
 				continue
 			}
 
-			// re-use the batchValues slice to avoid allocations
-			// this is safe because the iteration is always ahead of the append
 			filteredValues = filteredValues[:0]
 			count := 1
 			for _, v := range batchValues {
@@ -463,8 +458,8 @@ loop:
 		}
 
 		// We can reuse postings for matchers for each batch of values.
-		if p == nil {
-			p, err = PostingsForMatchers(ctx, r, matchers...)
+		if postingsForMatchers == nil {
+			postingsForMatchers, err = PostingsForMatchers(ctx, r, matchers...)
 			if err != nil {
 				return nil, fmt.Errorf("fetching postings for matchers: %w", err)
 			}
@@ -474,7 +469,6 @@ loop:
 			valuesPostings = make([]index.Postings, len(batchValues))
 		}
 
-		// Resize to current batch size
 		valuesPostings = valuesPostings[:len(batchValues)]
 
 		// Fetch values postings for this batch
@@ -485,7 +479,9 @@ loop:
 			}
 		}
 
-		indexes, err := index.FindIntersectingPostings(p, valuesPostings)
+		indexHeap = indexHeap[:0]
+		indexes = indexes[:0]
+		indexes, err = index.FindIntersectingPostingsWithReuse(postingsForMatchers, valuesPostings, &indexHeap, &indexes)
 		if err != nil {
 			return nil, fmt.Errorf("intersecting postings: %w", err)
 		}
